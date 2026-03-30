@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Morgan Pronunciation</title>
+</head>
+
+<body>
+
+  <h1>🎙️ Morgan Pronunciation</h1>
+
+  <button onclick="startMorgan()">Start speaking</button>
+
+  <p id="status">Status: idle</p>
+
+  <script>
+    async function startMorgan() {
+      document.getElementById("status").innerText = "Connecting...";
+
+      try {
+        // 1. Pedir sesión efímera a Netlify
+        const response = await fetch("/.netlify/functions/session");
+        const data = await response.json();
+
+        const EPHEMERAL_KEY = data.client_secret.value;
+
+        // 2. Crear conexión WebRTC
+        const pc = new RTCPeerConnection();
+
+        const audioEl = document.createElement("audio");
+        audioEl.autoplay = true;
+
+        pc.ontrack = e => {
+          audioEl.srcObject = e.streams[0];
+        };
+
+        // 3. Activar micrófono
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+        // 4. Canal de datos
+        const dc = pc.createDataChannel("oai-events");
+
+        // 5. Crear oferta
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const baseUrl = "https://api.openai.com/v1/realtime";
+        const model = "gpt-4o-realtime-preview";
+
+        // 6. Enviar oferta a OpenAI
+        const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
+          method: "POST",
+          body: offer.sdp,
+          headers: {
+            Authorization: `Bearer ${EPHEMERAL_KEY}`,
+            "Content-Type": "application/sdp"
+          },
+        });
+
+        const answer = {
+          type: "answer",
+          sdp: await sdpResponse.text(),
+        };
+
+        // 7. Establecer conexión
+        await pc.setRemoteDescription(answer);
+
+        document.getElementById("status").innerText = "Connected. Speak now 🎤";
+
+      } catch (error) {
+        console.error(error);
+        document.getElementById("status").innerText = "Error: " + error.message;
+      }
+    }
+  </script>
+
+</body>
+</html>
