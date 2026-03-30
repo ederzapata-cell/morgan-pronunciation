@@ -10,8 +10,7 @@ export default async () => {
         session: {
           type: "realtime",
           model: "gpt-4o-realtime-preview",
-          voice: "alloy",
-          instructions: "You are Morgan, a friendly English pronunciation coach. Help the student improve pronunciation, speaking, and confidence through natural voice conversation."
+          instructions: "You are Morgan, a friendly English pronunciation coach. Help the student improve pronunciation through voice conversation."
         }
       })
     });
@@ -24,6 +23,7 @@ export default async () => {
         "Content-Type": "application/json"
       }
     });
+
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
