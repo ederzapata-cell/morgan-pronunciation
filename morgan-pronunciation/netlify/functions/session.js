@@ -1,35 +1,35 @@
-export default async (req, res) => {
+export default async () => {
   try {
-    const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
+    const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "gpt-4o-realtime-preview",
-        voice: "alloy",
-        instructions: "You are Morgan, a friendly English pronunciation coach.",
-        audio: {
-          input: {
-            format: {
-              type: "audio/webm"
-            }
-          },
-          output: {
-            format: {
-              type: "audio/webm"
-            }
-          }
+        session: {
+          type: "realtime",
+          model: "gpt-4o-realtime-preview",
+          voice: "alloy",
+          instructions: "You are Morgan, a friendly English pronunciation coach. Help the student improve pronunciation, speaking, and confidence through natural voice conversation."
         }
       })
     });
 
     const data = await response.json();
 
-    res.status(200).json(data);
-
+    return new Response(JSON.stringify(data), {
+      status: response.status,
+      headers: {
+        "Content-Type": "application/json"
+      }
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json"
+      }
+    });
   }
 };
