@@ -16,18 +16,20 @@
   <p id="status">Status: idle</p>
 
   <script>
+    let pc;
+
     async function startMorgan() {
       document.getElementById("status").innerText = "Connecting...";
 
       try {
-        // 1. Obtener token desde Netlify
-        const response = await fetch("/.netlify/functions/session");
-        const data = await response.json();
+        // 1. Obtener token efímero desde Netlify
+        const tokenResponse = await fetch("/.netlify/functions/session");
+        const data = await tokenResponse.json();
 
         const EPHEMERAL_KEY = data.value;
 
         // 2. Crear conexión WebRTC
-        const pc = new RTCPeerConnection();
+        pc = new RTCPeerConnection();
 
         // 3. Audio remoto (voz de Morgan)
         const audio = document.createElement("audio");
@@ -38,32 +40,34 @@
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-        // 5. Canal de datos
-        const dc = pc.createDataChannel("oai-events");
-
-        // 6. Crear oferta
+        // 5. Crear oferta SDP
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        // 7. Enviar a OpenAI
-        const baseUrl = "https://api.openai.com/v1/realtime";
-        const model = "gpt-4o-realtime-preview";
+        // 6. Enviar SDP a OpenAI (FORMA CORRECTA)
+        const response = await fetch(
+          "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${EPHEMERAL_KEY}`,
+              "Content-Type": "application/sdp"
+            },
+            body: offer.sdp
+          }
+        );
 
-        const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-          method: "POST",
-          body: offer.sdp,
-          headers: {
-            Authorization: `Bearer ${EPHEMERAL_KEY}`,
-            "Content-Type": "application/sdp"
-          },
-        });
+        const answerSDP = await response.text();
 
-        const answer = {
+        // 🔴 Validación clave (evita error v=)
+        if (!answerSDP.startsWith("v=")) {
+          throw new Error("Respuesta inválida del servidor:\n" + answerSDP);
+        }
+
+        await pc.setRemoteDescription({
           type: "answer",
-          sdp: await sdpResponse.text(),
-        };
-
-        await pc.setRemoteDescription(answer);
+          sdp: answerSDP
+        });
 
         document.getElementById("status").innerText = "Connected 🎤";
 
