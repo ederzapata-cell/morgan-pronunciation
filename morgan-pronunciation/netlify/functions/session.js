@@ -9,7 +9,7 @@ export async function handler() {
       },
       body: JSON.stringify({
         model: "gpt-4o-realtime-preview",
-        voice: "alloy",
+        voice: "verse",
         instructions: "You are Morgan, a friendly English pronunciation coach. Help the student improve pronunciation through voice conversation."
       })
     });
