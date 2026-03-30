@@ -1,26 +1,24 @@
-exports.handler = async function () {
+export default async (req, res) => {
   try {
-    const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+    const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        session: {
-          type: "realtime",
-          model: "gpt-4o-realtime-preview",
-          audio: {
-            input: {
-              format: "pcm16",
-              transcription: null,
-              turn_detection: {
-                type: "server_vad",
-                create_response: true
-              }
-            },
-            output: {
-              voice: "alloy"
+        model: "gpt-4o-realtime-preview",
+        voice: "alloy",
+        instructions: "You are Morgan, a friendly English pronunciation coach.",
+        audio: {
+          input: {
+            format: {
+              type: "audio/webm"
+            }
+          },
+          output: {
+            format: {
+              type: "audio/webm"
             }
           }
         }
@@ -29,22 +27,9 @@ exports.handler = async function () {
 
     const data = await response.json();
 
-    return {
-      statusCode: response.status,
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(data)
-    };
+    res.status(200).json(data);
+
   } catch (error) {
-    return {
-      statusCode: 500,
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        error: error.message
-      })
-    };
+    res.status(500).json({ error: error.message });
   }
 };
