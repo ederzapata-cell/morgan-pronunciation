@@ -1,50 +1,365 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Morgan Pronunciation</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Morgan Speaking</title>
+  <style>
+    :root {
+      --pe-blue: #0096E1;
+      --pe-blue-soft: #7FA1E6;
+      --pe-blue-light: #C9D5EE;
+      --text-dark: #18324a;
+      --text-soft: #4f6580;
+      --white: #ffffff;
+      --card-border: rgba(0, 150, 225, 0.15);
+      --shadow: 0 18px 40px rgba(21, 55, 94, 0.14);
+      --success: #23b26d;
+      --warning: #e5a100;
+      --danger: #d9534f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: Arial, Helvetica, sans-serif;
+      background: linear-gradient(180deg, var(--pe-blue-soft) 0%, var(--pe-blue-light) 100%);
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px 14px;
+    }
+
+    .app-shell {
+      width: 100%;
+      max-width: 460px;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--card-border);
+      border-radius: 30px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(6px);
+    }
+
+    .top-section {
+      padding: 22px 20px 12px;
+      text-align: center;
+    }
+
+    .avatar-frame {
+      width: 148px;
+      height: 148px;
+      margin: 0 auto 14px;
+      border-radius: 28px;
+      background: rgba(255,255,255,0.78);
+      border: 2px solid rgba(0, 150, 225, 0.14);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      box-shadow: 0 10px 22px rgba(0, 150, 225, 0.08);
+    }
+
+    .avatar-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--text-dark);
+      font-size: 32px;
+      line-height: 1.08;
+      letter-spacing: -0.3px;
+    }
+
+    .subtitle {
+      margin: 10px auto 0;
+      max-width: 320px;
+      color: var(--text-soft);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .body-section {
+      padding: 12px 20px 20px;
+    }
+
+    .status-box {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.68);
+      border: 1px solid rgba(0, 150, 225, 0.12);
+      margin-bottom: 16px;
+    }
+
+    .status-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #97a6b7;
+      flex: 0 0 auto;
+    }
+
+    .status-dot.connecting {
+      background: var(--warning);
+    }
+
+    .status-dot.connected {
+      background: var(--success);
+    }
+
+    .status-dot.error {
+      background: var(--danger);
+    }
+
+    #status {
+      color: var(--text-dark);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .start-btn {
+      width: 100%;
+      border: 0;
+      border-radius: 18px;
+      background: var(--pe-blue);
+      color: white;
+      padding: 16px 18px;
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 12px 24px rgba(0, 150, 225, 0.22);
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+
+    .start-btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .start-btn:active {
+      transform: translateY(0);
+    }
+
+    .start-btn:disabled {
+      opacity: 0.72;
+      cursor: not-allowed;
+    }
+
+    .tips-box,
+    .speech-box {
+      margin-top: 16px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.68);
+      border: 1px solid rgba(0, 150, 225, 0.12);
+      padding: 16px;
+    }
+
+    .box-title {
+      margin: 0 0 10px;
+      color: var(--pe-blue);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .tips-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--text-soft);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    #morganTranscript {
+      min-height: 92px;
+      color: var(--text-dark);
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .footer-brand {
+      margin-top: 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      color: var(--text-soft);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .footer-brand img {
+      width: 150px;
+      max-width: 80%;
+      height: auto;
+      object-fit: contain;
+    }
+
+    @media (max-width: 420px) {
+      .card {
+        border-radius: 24px;
+      }
+
+      .top-section {
+        padding: 18px 16px 10px;
+      }
+
+      .body-section {
+        padding: 10px 16px 16px;
+      }
+
+      .avatar-frame {
+        width: 130px;
+        height: 130px;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+    }
+  </style>
 </head>
+<body>
+  <div class="app-shell">
+    <div class="card">
+      <div class="top-section">
+        <div class="avatar-frame">
+          <img src="https://i.imgur.com/0u7rTzQ.png" alt="Morgan Avatar" />
+        </div>
 
-<body style="text-align:center; font-family:sans-serif; padding:40px;">
+        <h1>Morgan Speaking</h1>
+        <p class="subtitle">
+          Speak naturally, ask questions freely, and improve your English with real-time guidance from Morgan.
+        </p>
+      </div>
 
-  <h1>🎤 Morgan Pronunciation</h1>
+      <div class="body-section">
+        <div class="status-box">
+          <div id="statusDot" class="status-dot"></div>
+          <div id="status">Status: idle</div>
+        </div>
 
-  <button id="startBtn" style="padding:15px 25px; font-size:18px;">
-    Start Speaking
-  </button>
+        <button id="startBtn" class="start-btn">Start Speaking</button>
 
-  <p id="status">Status: idle</p>
+        <div class="speech-box">
+          <p class="box-title">Morgan says</p>
+          <div id="morganTranscript">
+            Morgan’s responses will appear here.
+          </div>
+        </div>
+
+        <div class="tips-box">
+          <p class="box-title">Before you begin</p>
+          <ul class="tips-list">
+            <li>Allow microphone access when your browser asks.</li>
+            <li>You can ask for pronunciation, structure, vocabulary, or translation help.</li>
+            <li>Morgan can guide you in English and support you in Spanish when needed.</li>
+          </ul>
+        </div>
+
+        <div class="footer-brand">
+          <div>Provided by</div>
+          <img src="https://i.imgur.com/4sMS7qM.png" alt="Private English Logo" />
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
     let pc;
+    let dc;
+    let audioEl;
+    let remoteTranscript = "";
+
+    function setStatus(text, mode = "idle") {
+      const status = document.getElementById("status");
+      const dot = document.getElementById("statusDot");
+
+      status.innerText = text;
+      dot.className = "status-dot";
+
+      if (mode === "connecting") dot.classList.add("connecting");
+      if (mode === "connected") dot.classList.add("connected");
+      if (mode === "error") dot.classList.add("error");
+    }
+
+    function updateMorganTranscript(text) {
+      document.getElementById("morganTranscript").innerText = text;
+    }
 
     async function startMorgan() {
-      document.getElementById("status").innerText = "Connecting...";
+      setStatus("Status: connecting...", "connecting");
+      updateMorganTranscript("Morgan is getting ready...");
 
       try {
-        // 1. Obtener token efímero desde Netlify
         const tokenResponse = await fetch("/.netlify/functions/session");
         const data = await tokenResponse.json();
 
         const EPHEMERAL_KEY = data.value;
 
-        // 2. Crear conexión WebRTC
         pc = new RTCPeerConnection();
 
-        // 3. Audio remoto (voz de Morgan)
-        const audio = document.createElement("audio");
-        audio.autoplay = true;
-        pc.ontrack = e => audio.srcObject = e.streams[0];
+        audioEl = document.createElement("audio");
+        audioEl.autoplay = true;
+        pc.ontrack = e => {
+          audioEl.srcObject = e.streams[0];
+        };
 
-        // 4. Micrófono
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-        // 5. Crear oferta SDP
+        dc = pc.createDataChannel("oai-events");
+
+        dc.addEventListener("message", (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+
+            if (msg.type === "response.audio_transcript.delta" && msg.delta) {
+              remoteTranscript += msg.delta;
+              updateMorganTranscript(remoteTranscript);
+            }
+
+            if (msg.type === "response.audio_transcript.done") {
+              if (msg.transcript) {
+                remoteTranscript = msg.transcript;
+                updateMorganTranscript(remoteTranscript);
+              }
+            }
+
+            if (msg.type === "response.created") {
+              remoteTranscript = "";
+              updateMorganTranscript("Morgan is speaking...");
+            }
+
+            if (msg.type === "error") {
+              console.error("Realtime error:", msg);
+            }
+          } catch (err) {
+            console.error("Data channel parse error:", err);
+          }
+        });
+
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        // 6. Enviar SDP a OpenAI (FORMA CORRECTA)
         const response = await fetch(
           "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
           {
@@ -59,9 +374,8 @@
 
         const answerSDP = await response.text();
 
-        // 🔴 Validación clave (evita error v=)
         if (!answerSDP.startsWith("v=")) {
-          throw new Error("Respuesta inválida del servidor:\n" + answerSDP);
+          throw new Error("Invalid server response:\n" + answerSDP);
         }
 
         await pc.setRemoteDescription({
@@ -69,18 +383,26 @@
           sdp: answerSDP
         });
 
-        document.getElementById("status").innerText = "Connected 🎤";
+        dc.addEventListener("open", () => {
+          dc.send(JSON.stringify({
+            type: "response.create",
+            response: {
+              modalities: ["audio", "text"]
+            }
+          }));
+        });
 
+        setStatus("Status: connected 🎤", "connected");
+        updateMorganTranscript("You can start speaking now.");
       } catch (error) {
         console.error(error);
-        document.getElementById("status").innerText = "Error ❌";
+        setStatus("Status: error ❌", "error");
+        updateMorganTranscript("There was a connection error. Please try again.");
         alert("Error: " + error.message);
       }
     }
 
-    // Conectar botón
     document.getElementById("startBtn").onclick = startMorgan;
   </script>
-
 </body>
 </html>
