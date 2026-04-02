@@ -13,7 +13,6 @@
       --text-dark: #18324a;
       --text-soft: #4f6580;
       --success: #23b26d;
-      --warning: #e5a100;
       --danger: #d9534f;
     }
 
@@ -25,6 +24,8 @@
       justify-content: center;
       align-items: center;
       padding: 20px;
+      min-height: 100vh;
+      box-sizing: border-box;
     }
 
     .card {
@@ -66,6 +67,7 @@
     .status {
       margin-bottom: 12px;
       font-weight: bold;
+      color: var(--text-dark);
     }
 
     .btn {
@@ -79,6 +81,24 @@
       cursor: pointer;
     }
 
+    .btn:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .live-indicator {
+      display: none;
+      margin-top: 4px;
+      margin-bottom: 12px;
+      font-weight: bold;
+      color: var(--success);
+      font-size: 15px;
+    }
+
     .transcript {
       margin-top: 16px;
       padding: 12px;
@@ -87,6 +107,8 @@
       min-height: 80px;
       text-align: left;
       font-size: 14px;
+      color: var(--text-dark);
+      white-space: pre-wrap;
     }
 
     .footer {
@@ -99,17 +121,13 @@
       width: 140px;
       margin-top: 6px;
     }
-
   </style>
 </head>
 
 <body>
-
   <div class="card">
-
     <div class="avatar">
-      <!-- 👇 AQUÍ YA CORREGIDO -->
-      <img src="../morgan-avatar.png" alt="Morgan Avatar">
+      <img src="morgan-avatar.png" alt="Morgan Avatar">
     </div>
 
     <h1>Morgan Speaking</h1>
@@ -120,7 +138,9 @@
 
     <div id="status" class="status">Status: idle</div>
 
-    <button class="btn" onclick="startMorgan()">Start Speaking</button>
+    <button id="startBtn" class="btn">Start Speaking</button>
+
+    <div id="liveIndicator" class="live-indicator">Morgan is listening... 🎤</div>
 
     <div id="transcript" class="transcript">
       Morgan will speak here...
@@ -128,61 +148,135 @@
 
     <div class="footer">
       Provided by<br>
-      <!-- 👇 AQUÍ YA CORREGIDO -->
-      <img src="../private-english-logo.png" alt="Private English Logo">
+      <img src="private-english-logo.png" alt="Private English Logo">
     </div>
-
   </div>
 
   <script>
-    let pc;
-    let dc;
+    let pc = null;
+    let dc = null;
+    let localStream = null;
+    let remoteAudioEl = null;
     let transcript = "";
+    let isStarting = false;
+    let isConnected = false;
+
+    const startBtn = document.getElementById("startBtn");
+    const statusEl = document.getElementById("status");
+    const transcriptEl = document.getElementById("transcript");
+    const liveIndicator = document.getElementById("liveIndicator");
 
     function setStatus(text) {
-      document.getElementById("status").innerText = text;
+      statusEl.innerText = text;
     }
 
     function updateTranscript(text) {
-      document.getElementById("transcript").innerText = text;
+      transcriptEl.innerText = text;
+    }
+
+    function hideStartButton() {
+      startBtn.disabled = true;
+      startBtn.classList.add("hidden");
+      liveIndicator.style.display = "block";
+    }
+
+    function showStartButton() {
+      startBtn.disabled = false;
+      startBtn.classList.remove("hidden");
+      liveIndicator.style.display = "none";
+    }
+
+    async function cleanupSession() {
+      try {
+        if (dc) {
+          dc.onmessage = null;
+          try { dc.close(); } catch (_) {}
+          dc = null;
+        }
+
+        if (pc) {
+          pc.ontrack = null;
+          try { pc.close(); } catch (_) {}
+          pc = null;
+        }
+
+        if (localStream) {
+          localStream.getTracks().forEach(track => {
+            try { track.stop(); } catch (_) {}
+          });
+          localStream = null;
+        }
+
+        if (remoteAudioEl) {
+          try {
+            remoteAudioEl.pause();
+            remoteAudioEl.srcObject = null;
+            remoteAudioEl.remove();
+          } catch (_) {}
+          remoteAudioEl = null;
+        }
+      } catch (_) {}
     }
 
     async function startMorgan() {
+      if (isStarting || isConnected) return;
+
+      isStarting = true;
+      startBtn.disabled = true;
       setStatus("Connecting...");
       updateTranscript("Morgan is getting ready...");
 
       try {
+        await cleanupSession();
+        transcript = "";
+
         const tokenRes = await fetch("/.netlify/functions/session");
         const data = await tokenRes.json();
+
+        if (!data || !data.value) {
+          throw new Error("No session token received");
+        }
 
         const key = data.value;
 
         pc = new RTCPeerConnection();
 
-        const audio = document.createElement("audio");
-        audio.autoplay = true;
+        remoteAudioEl = document.createElement("audio");
+        remoteAudioEl.autoplay = true;
+        remoteAudioEl.playsInline = true;
+        document.body.appendChild(remoteAudioEl);
 
-        pc.ontrack = e => {
-          audio.srcObject = e.streams[0];
+        pc.ontrack = (e) => {
+          if (remoteAudioEl.srcObject !== e.streams[0]) {
+            remoteAudioEl.srcObject = e.streams[0];
+          }
         };
 
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
         dc = pc.createDataChannel("oai-events");
 
         dc.onmessage = (event) => {
-          const msg = JSON.parse(event.data);
+          try {
+            const msg = JSON.parse(event.data);
 
-          if (msg.type === "response.audio_transcript.delta") {
-            transcript += msg.delta;
-            updateTranscript(transcript);
-          }
+            if (msg.type === "response.created") {
+              transcript = "";
+              updateTranscript("Morgan is speaking...");
+            }
 
-          if (msg.type === "response.created") {
-            transcript = "";
-            updateTranscript("Morgan is speaking...");
+            if (msg.type === "response.audio_transcript.delta" && msg.delta) {
+              transcript += msg.delta;
+              updateTranscript(transcript);
+            }
+
+            if (msg.type === "response.audio_transcript.done" && msg.transcript) {
+              transcript = msg.transcript;
+              updateTranscript(transcript);
+            }
+          } catch (parseErr) {
+            console.error("Data channel parse error:", parseErr);
           }
         };
 
@@ -203,20 +297,31 @@
 
         const answer = await response.text();
 
+        if (!answer || !answer.startsWith("v=")) {
+          throw new Error("Invalid SDP answer");
+        }
+
         await pc.setRemoteDescription({
           type: "answer",
           sdp: answer
         });
 
+        isStarting = false;
+        isConnected = true;
         setStatus("Connected 🎤");
-
+        hideStartButton();
       } catch (err) {
         console.error(err);
-        setStatus("Error ❌");
+        await cleanupSession();
         updateTranscript("Something went wrong");
+        setStatus("Error ❌");
+        isStarting = false;
+        isConnected = false;
+        showStartButton();
       }
     }
-  </script>
 
+    startBtn.addEventListener("click", startMorgan);
+  </script>
 </body>
 </html>
