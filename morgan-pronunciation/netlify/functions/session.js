@@ -1,4 +1,14 @@
-export async function handler() {
+export async function handler(event) {
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ error: "Method Not Allowed" })
+    };
+  }
+
   try {
     const apiKey = process.env.OPENAI_API_KEY;
 
@@ -6,31 +16,16 @@ export async function handler() {
       return {
         statusCode: 500,
         headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          error: "Missing OPENAI_API_KEY"
-        })
+        body: JSON.stringify({ error: "Missing OPENAI_API_KEY" })
       };
     }
 
-    const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        expires_after: {
-          anchor: "created_at",
-          seconds: 600
-        },
-        session: {
-          type: "realtime",
-          model: "gpt-realtime",
-          voice: "verse",
-          instructions: `You are Morgan, a friendly and highly effective English speaking tutor from Private English.
+    const sessionConfig = {
+      type: "realtime",
+      model: "gpt-realtime",
+      instructions: `You are Morgan, a friendly and highly effective English speaking tutor from Private English.
 
 You interact with the student through spoken English.
 
@@ -213,32 +208,44 @@ FINAL GOAL
 ========================
 
 Make the student speak more, feel confident, and improve naturally.`,
-          audio: {
-            input: {
-              turn_detection: {
-                type: "server_vad",
-                create_response: true,
-                interrupt_response: true,
-                silence_duration_ms: 700,
-                prefix_padding_ms: 300
-              }
-            }
+      audio: {
+        input: {
+          turn_detection: {
+            type: "server_vad",
+            create_response: true,
+            interrupt_response: true,
+            silence_duration_ms: 700,
+            prefix_padding_ms: 300
           }
+        },
+        output: {
+          voice: "verse"
         }
-      })
+      }
+    };
+
+    const formData = new FormData();
+    formData.set("sdp", event.body || "");
+    formData.set("session", JSON.stringify(sessionConfig));
+
+    const response = await fetch("https://api.openai.com/v1/realtime/calls", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: formData
     });
 
-    const data = await response.json();
+    const answer = await response.text();
 
     if (!response.ok) {
       return {
         statusCode: response.status,
         headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          error: data
+          error: answer
         })
       };
     }
@@ -246,21 +253,15 @@ Make the student speak more, feel confident, and improve naturally.`,
     return {
       statusCode: 200,
       headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
+        "Content-Type": "application/sdp"
       },
-      body: JSON.stringify({
-        value: data.value,
-        expires_at: data.expires_at,
-        session: data.session
-      })
+      body: answer
     };
   } catch (error) {
     return {
       statusCode: 500,
       headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
         error: error.message || "Unexpected server error"
