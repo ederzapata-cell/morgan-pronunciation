@@ -143,7 +143,7 @@
     <div id="liveIndicator" class="live-indicator">Morgan is listening... 🎤</div>
 
     <div id="transcript" class="transcript">
-      Morgan will speak here...
+      Tap Start Speaking and say hello to Morgan.
     </div>
 
     <div class="footer">
@@ -196,6 +196,7 @@
 
         if (pc) {
           pc.ontrack = null;
+          pc.onconnectionstatechange = null;
           try { pc.close(); } catch (_) {}
           pc = null;
         }
@@ -222,7 +223,7 @@
       if (isStarting || isConnected) return;
 
       isStarting = true;
-      startBtn.disabled = true;
+      hideStartButton();
       setStatus("Connecting...");
       updateTranscript("Morgan is getting ready...");
 
@@ -233,8 +234,12 @@
         const tokenRes = await fetch("/.netlify/functions/session");
         const data = await tokenRes.json();
 
+        if (!tokenRes.ok) {
+          throw new Error(JSON.stringify(data));
+        }
+
         if (!data || !data.value) {
-          throw new Error("No session token received");
+          throw new Error("No client secret received");
         }
 
         const key = data.value;
@@ -252,28 +257,63 @@
           }
         };
 
+        pc.onconnectionstatechange = async () => {
+          if (!pc) return;
+
+          if (pc.connectionState === "failed" || pc.connectionState === "disconnected" || pc.connectionState === "closed") {
+            await cleanupSession();
+            isStarting = false;
+            isConnected = false;
+            setStatus("Disconnected");
+            updateTranscript("Connection closed.");
+            showStartButton();
+          }
+        };
+
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
         dc = pc.createDataChannel("oai-events");
 
+        dc.onopen = () => {
+          setStatus("Connected 🎤");
+          isStarting = false;
+          isConnected = true;
+
+          // Fuerza un saludo inicial de Morgan apenas abre el canal.
+          dc.send(JSON.stringify({
+            type: "response.create",
+            response: {
+              modalities: ["audio", "text"]
+            }
+          }));
+        };
+
         dc.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
+
+            console.log("Realtime event:", msg);
 
             if (msg.type === "response.created") {
               transcript = "";
               updateTranscript("Morgan is speaking...");
             }
 
-            if (msg.type === "response.audio_transcript.delta" && msg.delta) {
+            if (msg.type === "response.output_audio_transcript.delta" && msg.delta) {
               transcript += msg.delta;
               updateTranscript(transcript);
             }
 
-            if (msg.type === "response.audio_transcript.done" && msg.transcript) {
+            if (msg.type === "response.output_audio_transcript.done" && msg.transcript) {
               transcript = msg.transcript;
               updateTranscript(transcript);
+            }
+
+            if (msg.type === "error") {
+              console.error("Realtime error event:", msg);
+              updateTranscript("OpenAI error: " + (msg.error?.message || "Unknown error"));
+              setStatus("Error ❌");
             }
           } catch (parseErr) {
             console.error("Data channel parse error:", parseErr);
@@ -283,19 +323,20 @@
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        const response = await fetch(
-          "https://api.openai.com/v1/realtime?model=gpt-realtime-mini",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${key}`,
-              "Content-Type": "application/sdp"
-            },
-            body: offer.sdp
-          }
-        );
+        const response = await fetch("https://api.openai.com/v1/realtime/calls", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "Content-Type": "application/sdp"
+          },
+          body: offer.sdp
+        });
 
         const answer = await response.text();
+
+        if (!response.ok) {
+          throw new Error(answer);
+        }
 
         if (!answer || !answer.startsWith("v=")) {
           throw new Error("Invalid SDP answer");
@@ -306,10 +347,6 @@
           sdp: answer
         });
 
-        isStarting = false;
-        isConnected = true;
-        setStatus("Connected 🎤");
-        hideStartButton();
       } catch (err) {
         console.error(err);
         await cleanupSession();
