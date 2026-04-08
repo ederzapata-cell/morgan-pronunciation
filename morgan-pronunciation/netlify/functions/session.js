@@ -1,4 +1,4 @@
-export async function handler(event) {
+export async function handler() {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
 
@@ -15,26 +15,21 @@ export async function handler(event) {
       };
     }
 
-    // Si alguien abre la función en el navegador, responde algo claro.
-    // Pero NO bloquea el POST real del frontend.
-    if (!event.body) {
-      return {
-        statusCode: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+    const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        expires_after: {
+          anchor: "created_at",
+          seconds: 600
         },
-        body: JSON.stringify({
-          ok: true,
-          message: "Session function is live. This endpoint expects an SDP POST from the app."
-        })
-      };
-    }
-
-    const sessionConfig = {
-      type: "realtime",
-      model: "gpt-realtime",
-      instructions: `You are Morgan, a friendly and highly effective English speaking tutor from Private English.
+        session: {
+          type: "realtime",
+          model: "gpt-realtime",
+          instructions: `You are Morgan, a friendly and highly effective English speaking tutor from Private English.
 
 You interact with the student through spoken English.
 
@@ -217,35 +212,25 @@ FINAL GOAL
 ========================
 
 Make the student speak more, feel confident, and improve naturally.`,
-      audio: {
-        input: {
-          turn_detection: {
-            type: "server_vad",
-            create_response: true,
-            interrupt_response: true,
-            silence_duration_ms: 700,
-            prefix_padding_ms: 300
+          audio: {
+            input: {
+              turn_detection: {
+                type: "server_vad",
+                create_response: true,
+                interrupt_response: true,
+                silence_duration_ms: 700,
+                prefix_padding_ms: 300
+              }
+            },
+            output: {
+              voice: "verse"
+            }
           }
-        },
-        output: {
-          voice: "verse"
         }
-      }
-    };
-
-    const formData = new FormData();
-    formData.set("sdp", event.body);
-    formData.set("session", JSON.stringify(sessionConfig));
-
-    const response = await fetch("https://api.openai.com/v1/realtime/calls", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: formData
+      })
     });
 
-    const answer = await response.text();
+    const data = await response.json();
 
     if (!response.ok) {
       return {
@@ -254,19 +239,20 @@ Make the student speak more, feel confident, and improve naturally.`,
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*"
         },
-        body: JSON.stringify({
-          error: answer
-        })
+        body: JSON.stringify(data)
       };
     }
 
     return {
       statusCode: 200,
       headers: {
-        "Content-Type": "application/sdp",
+        "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*"
       },
-      body: answer
+      body: JSON.stringify({
+        value: data.value,
+        expires_at: data.expires_at
+      })
     };
   } catch (error) {
     return {
