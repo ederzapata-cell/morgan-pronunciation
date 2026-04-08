@@ -232,6 +232,15 @@
         await cleanupSession();
         transcript = "";
 
+        const tokenRes = await fetch("/.netlify/functions/session");
+        const tokenData = await tokenRes.json();
+
+        if (!tokenRes.ok || !tokenData.value) {
+          throw new Error(JSON.stringify(tokenData));
+        }
+
+        const EPHEMERAL_KEY = tokenData.value;
+
         pc = new RTCPeerConnection();
 
         remoteAudioEl = document.createElement("audio");
@@ -271,21 +280,13 @@
           setStatus("Connected 🎤");
           isStarting = false;
           isConnected = true;
-
-          dc.send(JSON.stringify({
-            type: "response.create"
-          }));
+          updateTranscript("Morgan is listening...");
         };
 
         dc.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
             console.log("Realtime event:", msg);
-
-            if (msg.type === "response.created") {
-              transcript = "";
-              updateTranscript("Morgan is speaking...");
-            }
 
             if (msg.type === "response.output_audio_transcript.delta" && msg.delta) {
               transcript += msg.delta;
@@ -302,35 +303,32 @@
               setStatus("Error ❌");
               updateTranscript(msg.error?.message || "OpenAI error");
             }
-          } catch (parseErr) {
-            console.error("Data channel parse error:", parseErr);
+          } catch (err) {
+            console.error("Data channel parse error:", err);
           }
         };
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        const response = await fetch("/.netlify/functions/session", {
+        const sdpResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
           method: "POST",
+          body: offer.sdp,
           headers: {
+            Authorization: `Bearer ${EPHEMERAL_KEY}`,
             "Content-Type": "application/sdp"
-          },
-          body: offer.sdp
+          }
         });
 
-        const answer = await response.text();
+        const answerSdp = await sdpResponse.text();
 
-        if (!response.ok) {
-          throw new Error(answer);
-        }
-
-        if (!answer || !answer.startsWith("v=")) {
-          throw new Error("Invalid SDP answer");
+        if (!sdpResponse.ok) {
+          throw new Error(answerSdp);
         }
 
         await pc.setRemoteDescription({
           type: "answer",
-          sdp: answer
+          sdp: answerSdp
         });
 
       } catch (err) {
