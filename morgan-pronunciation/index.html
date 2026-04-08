@@ -189,6 +189,7 @@
     async function cleanupSession() {
       try {
         if (dc) {
+          dc.onopen = null;
           dc.onmessage = null;
           try { dc.close(); } catch (_) {}
           dc = null;
@@ -231,19 +232,6 @@
         await cleanupSession();
         transcript = "";
 
-        const tokenRes = await fetch("/.netlify/functions/session");
-        const data = await tokenRes.json();
-
-        if (!tokenRes.ok) {
-          throw new Error(JSON.stringify(data));
-        }
-
-        if (!data || !data.value) {
-          throw new Error("No client secret received");
-        }
-
-        const key = data.value;
-
         pc = new RTCPeerConnection();
 
         remoteAudioEl = document.createElement("audio");
@@ -260,7 +248,11 @@
         pc.onconnectionstatechange = async () => {
           if (!pc) return;
 
-          if (pc.connectionState === "failed" || pc.connectionState === "disconnected" || pc.connectionState === "closed") {
+          if (
+            pc.connectionState === "failed" ||
+            pc.connectionState === "disconnected" ||
+            pc.connectionState === "closed"
+          ) {
             await cleanupSession();
             isStarting = false;
             isConnected = false;
@@ -280,19 +272,14 @@
           isStarting = false;
           isConnected = true;
 
-          // Fuerza un saludo inicial de Morgan apenas abre el canal.
           dc.send(JSON.stringify({
-            type: "response.create",
-            response: {
-              modalities: ["audio", "text"]
-            }
+            type: "response.create"
           }));
         };
 
         dc.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
-
             console.log("Realtime event:", msg);
 
             if (msg.type === "response.created") {
@@ -312,8 +299,8 @@
 
             if (msg.type === "error") {
               console.error("Realtime error event:", msg);
-              updateTranscript("OpenAI error: " + (msg.error?.message || "Unknown error"));
               setStatus("Error ❌");
+              updateTranscript(msg.error?.message || "OpenAI error");
             }
           } catch (parseErr) {
             console.error("Data channel parse error:", parseErr);
@@ -323,10 +310,9 @@
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        const response = await fetch("https://api.openai.com/v1/realtime/calls", {
+        const response = await fetch("/.netlify/functions/session", {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${key}`,
             "Content-Type": "application/sdp"
           },
           body: offer.sdp
