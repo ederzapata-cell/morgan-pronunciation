@@ -7,7 +7,7 @@ export async function handler() {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "gpt-realtime",
+        model: "gpt-4o-realtime-preview",
         voice: "verse",
         instructions: `You are Morgan, a friendly and highly effective English speaking tutor from Private English.
 
@@ -202,7 +202,7 @@ Make the student speak more, feel confident, and improve naturally.`
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data.client_secret)
     };
   } catch (error) {
     return {
@@ -210,9 +210,4 @@ Make the student speak more, feel confident, and improve naturally.`
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        error: error.message
-      })
-    };
-  }
-}
+      body: JSON.stringify({ error: error.message })
