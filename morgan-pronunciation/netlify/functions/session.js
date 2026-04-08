@@ -1,13 +1,29 @@
 export async function handler() {
   try {
-    const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
+    const apiKey = process.env.OPENAI_API_KEY;
+
+    if (!apiKey) {
+      return {
+        statusCode: 500,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        },
+        body: JSON.stringify({
+          error: "Missing OPENAI_API_KEY"
+        })
+      };
+    }
+
+    const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "gpt-4o-realtime-preview",
+        type: "realtime",
+        model: "gpt-realtime",
         voice: "verse",
         instructions: `You are Morgan, a friendly and highly effective English speaking tutor from Private English.
 
@@ -191,23 +207,57 @@ Do not repeat this greeting again later.
 FINAL GOAL
 ========================
 
-Make the student speak more, feel confident, and improve naturally.`
+Make the student speak more, feel confident, and improve naturally.`,
+        audio: {
+          input: {
+            turn_detection: {
+              type: "server_vad",
+              create_response: true,
+              interrupt_response: true,
+              silence_duration_ms: 700,
+              prefix_padding_ms: 300
+            }
+          }
+        }
       })
     });
 
     const data = await response.json();
 
+    if (!response.ok) {
+      return {
+        statusCode: response.status,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        },
+        body: JSON.stringify({
+          error: data
+        })
+      };
+    }
+
     return {
-      statusCode: response.status,
+      statusCode: 200,
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
       },
-      body: JSON.stringify(data.client_secret)
+      body: JSON.stringify({
+        value: data.client_secret.value,
+        expires_at: data.client_secret.expires_at
+      })
     };
   } catch (error) {
     return {
       statusCode: 500,
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
       },
-      body: JSON.stringify({ error: error.message })
+      body: JSON.stringify({
+        error: error.message || "Unexpected server error"
+      })
+    };
+  }
+}
