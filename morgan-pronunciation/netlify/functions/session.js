@@ -1,14 +1,4 @@
 export async function handler(event) {
-  if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ error: "Method Not Allowed" })
-    };
-  }
-
   try {
     const apiKey = process.env.OPENAI_API_KEY;
 
@@ -16,9 +6,28 @@ export async function handler(event) {
       return {
         statusCode: 500,
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
         },
-        body: JSON.stringify({ error: "Missing OPENAI_API_KEY" })
+        body: JSON.stringify({
+          error: "Missing OPENAI_API_KEY"
+        })
+      };
+    }
+
+    // Si alguien abre la función en el navegador, responde algo claro.
+    // Pero NO bloquea el POST real del frontend.
+    if (!event.body) {
+      return {
+        statusCode: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        },
+        body: JSON.stringify({
+          ok: true,
+          message: "Session function is live. This endpoint expects an SDP POST from the app."
+        })
       };
     }
 
@@ -225,7 +234,7 @@ Make the student speak more, feel confident, and improve naturally.`,
     };
 
     const formData = new FormData();
-    formData.set("sdp", event.body || "");
+    formData.set("sdp", event.body);
     formData.set("session", JSON.stringify(sessionConfig));
 
     const response = await fetch("https://api.openai.com/v1/realtime/calls", {
@@ -242,7 +251,8 @@ Make the student speak more, feel confident, and improve naturally.`,
       return {
         statusCode: response.status,
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
         },
         body: JSON.stringify({
           error: answer
@@ -253,7 +263,8 @@ Make the student speak more, feel confident, and improve naturally.`,
     return {
       statusCode: 200,
       headers: {
-        "Content-Type": "application/sdp"
+        "Content-Type": "application/sdp",
+        "Access-Control-Allow-Origin": "*"
       },
       body: answer
     };
@@ -261,7 +272,8 @@ Make the student speak more, feel confident, and improve naturally.`,
     return {
       statusCode: 500,
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
       },
       body: JSON.stringify({
         error: error.message || "Unexpected server error"
