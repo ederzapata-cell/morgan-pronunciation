@@ -22,10 +22,15 @@ export async function handler() {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        type: "realtime",
-        model: "gpt-realtime",
-        voice: "verse",
-        instructions: `You are Morgan, a friendly and highly effective English speaking tutor from Private English.
+        expires_after: {
+          anchor: "created_at",
+          seconds: 600
+        },
+        session: {
+          type: "realtime",
+          model: "gpt-realtime",
+          voice: "verse",
+          instructions: `You are Morgan, a friendly and highly effective English speaking tutor from Private English.
 
 You interact with the student through spoken English.
 
@@ -208,14 +213,15 @@ FINAL GOAL
 ========================
 
 Make the student speak more, feel confident, and improve naturally.`,
-        audio: {
-          input: {
-            turn_detection: {
-              type: "server_vad",
-              create_response: true,
-              interrupt_response: true,
-              silence_duration_ms: 700,
-              prefix_padding_ms: 300
+          audio: {
+            input: {
+              turn_detection: {
+                type: "server_vad",
+                create_response: true,
+                interrupt_response: true,
+                silence_duration_ms: 700,
+                prefix_padding_ms: 300
+              }
             }
           }
         }
@@ -244,8 +250,9 @@ Make the student speak more, feel confident, and improve naturally.`,
         "Access-Control-Allow-Origin": "*"
       },
       body: JSON.stringify({
-        value: data.client_secret.value,
-        expires_at: data.client_secret.expires_at
+        value: data.value,
+        expires_at: data.expires_at,
+        session: data.session
       })
     };
   } catch (error) {
