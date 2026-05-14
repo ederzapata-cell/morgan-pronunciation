@@ -74,6 +74,32 @@
       pointer-events: none;
     }
 
+    .exit-btn {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      z-index: 5;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: none;
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--text-dark);
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(7, 36, 74, 0.10);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+    }
+
+    .exit-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 20px rgba(7, 36, 74, 0.14);
+    }
+
+    .exit-btn:active {
+      transform: translateY(0);
+    }
+
     .hero {
       position: relative;
       z-index: 1;
@@ -265,6 +291,13 @@
         border-radius: 26px;
       }
 
+      .exit-btn {
+        top: 12px;
+        left: 12px;
+        padding: 7px 10px;
+        font-size: 11px;
+      }
+
       .avatar {
         width: 154px;
       }
@@ -295,6 +328,8 @@
 
 <body>
   <div class="card">
+    <button id="exitBtn" class="exit-btn" type="button">Exit Practice</button>
+
     <div class="hero">
       <div class="avatar-wrap">
         <div class="avatar">
@@ -349,6 +384,7 @@
     let isConnected = false;
 
     const startBtn = document.getElementById("startBtn");
+    const exitBtn = document.getElementById("exitBtn");
     const statusEl = document.getElementById("status");
     const transcriptEl = document.getElementById("transcript");
     const liveIndicator = document.getElementById("liveIndicator");
@@ -405,6 +441,14 @@
           remoteAudioEl = null;
         }
       } catch (_) {}
+    }
+
+    async function exitPractice() {
+      setStatus("Exiting...");
+      await cleanupSession();
+      isStarting = false;
+      isConnected = false;
+      window.history.back();
     }
 
     async function startMorgan() {
@@ -530,6 +574,7 @@
     }
 
     startBtn.addEventListener("click", startMorgan);
+    exitBtn.addEventListener("click", exitPractice);
   </script>
 </body>
 </html>
