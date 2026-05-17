@@ -340,7 +340,7 @@
       <button id="startBtn" class="btn">Start Speaking</button>
       <button id="endSessionBtn" class="btn end-btn">End Session</button>
 
-      <div class="helper-text">
+      <div class="helper-text" id="helperText">
         Tap End Session when you finish practicing.
       </div>
     </div>
@@ -365,6 +365,7 @@
     const statusEl = document.getElementById("status");
     const transcriptEl = document.getElementById("transcript");
     const liveIndicator = document.getElementById("liveIndicator");
+    const helperText = document.getElementById("helperText");
 
     function setStatus(text) {
       statusEl.innerText = text;
@@ -429,7 +430,28 @@
       isStarting = false;
       isConnected = false;
 
-      window.history.back();
+      liveIndicator.style.display = "none";
+      showStartButton();
+
+      setStatus("Session ended");
+      updateTranscript("Your session has ended. Tap your phone’s Back button to return to Morgan.");
+      helperText.innerText = "Your practice session is closed. Use your phone’s Back button to return to the Morgan app.";
+
+      try {
+        window.history.go(-1);
+      } catch (_) {}
+
+      setTimeout(() => {
+        try {
+          window.history.back();
+        } catch (_) {}
+      }, 300);
+
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch (_) {}
+      }, 600);
     }
 
     async function startMorgan() {
@@ -439,6 +461,7 @@
       hideStartButton();
       setStatus("Connecting...");
       updateTranscript("Morgan is getting ready...");
+      helperText.innerText = "Tap End Session when you finish practicing.";
 
       try {
         await cleanupSession();
