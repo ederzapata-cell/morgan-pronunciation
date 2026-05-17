@@ -231,6 +231,17 @@
       box-shadow: 0 8px 18px rgba(0, 150, 225, 0.18);
     }
 
+    .end-btn {
+      margin-top: 10px;
+      background: linear-gradient(180deg, #ffffff, #f4f8fd);
+      color: var(--blue-deep);
+      box-shadow: inset 0 0 0 1px rgba(11, 58, 100, 0.16), 0 8px 18px rgba(7, 36, 74, 0.08);
+    }
+
+    .end-btn:hover {
+      box-shadow: inset 0 0 0 1px rgba(11, 58, 100, 0.20), 0 10px 20px rgba(7, 36, 74, 0.10);
+    }
+
     .hidden {
       display: none !important;
     }
@@ -327,9 +338,10 @@
 
     <div class="controls">
       <button id="startBtn" class="btn">Start Speaking</button>
+      <button id="endSessionBtn" class="btn end-btn">End Session</button>
 
       <div class="helper-text">
-        Tap the button and start practicing with Morgan.
+        Tap End Session when you finish practicing.
       </div>
     </div>
 
@@ -349,6 +361,7 @@
     let isConnected = false;
 
     const startBtn = document.getElementById("startBtn");
+    const endSessionBtn = document.getElementById("endSessionBtn");
     const statusEl = document.getElementById("status");
     const transcriptEl = document.getElementById("transcript");
     const liveIndicator = document.getElementById("liveIndicator");
@@ -405,6 +418,18 @@
           remoteAudioEl = null;
         }
       } catch (_) {}
+    }
+
+    async function endMorganSession() {
+      try {
+        setStatus("Ending session...");
+        await cleanupSession();
+      } catch (_) {}
+
+      isStarting = false;
+      isConnected = false;
+
+      window.history.back();
     }
 
     async function startMorgan() {
@@ -530,6 +555,7 @@
     }
 
     startBtn.addEventListener("click", startMorgan);
+    endSessionBtn.addEventListener("click", endMorganSession);
   </script>
 </body>
 </html>
