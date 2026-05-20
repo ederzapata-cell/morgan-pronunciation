@@ -360,6 +360,14 @@
     let isStarting = false;
     let isConnected = false;
 
+    let trialTimer = null;
+    let trialSecondsRemaining = 180;
+    const FREE_TRIAL_SECONDS = 180;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const accessMode = urlParams.get("access");
+    const isPaidAccess = accessMode === "paid";
+
     const startBtn = document.getElementById("startBtn");
     const endSessionBtn = document.getElementById("endSessionBtn");
     const statusEl = document.getElementById("status");
@@ -387,7 +395,46 @@
       liveIndicator.style.display = "none";
     }
 
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}:${secs.toString().padStart(2, "0")}`;
+    }
+
+    function clearTrialTimer() {
+      if (trialTimer) {
+        clearInterval(trialTimer);
+        trialTimer = null;
+      }
+    }
+
+    function startTrialTimer() {
+      clearTrialTimer();
+
+      if (isPaidAccess) {
+        helperText.innerText = "Tap End Session when you finish practicing.";
+        return;
+      }
+
+      trialSecondsRemaining = FREE_TRIAL_SECONDS;
+      helperText.innerText = `Free practice time remaining: ${formatTime(trialSecondsRemaining)}`;
+
+      trialTimer = setInterval(async () => {
+        trialSecondsRemaining -= 1;
+
+        if (trialSecondsRemaining > 0) {
+          helperText.innerText = `Free practice time remaining: ${formatTime(trialSecondsRemaining)}`;
+          return;
+        }
+
+        clearTrialTimer();
+        await endMorganTrialSession();
+      }, 1000);
+    }
+
     async function cleanupSession() {
+      clearTrialTimer();
+
       try {
         if (dc) {
           dc.onopen = null;
@@ -421,22 +468,7 @@
       } catch (_) {}
     }
 
-    async function endMorganSession() {
-      try {
-        setStatus("Ending session...");
-        await cleanupSession();
-      } catch (_) {}
-
-      isStarting = false;
-      isConnected = false;
-
-      liveIndicator.style.display = "none";
-      showStartButton();
-
-      setStatus("Session ended");
-      updateTranscript("Your session has ended. Tap your phone’s Back button to return to Morgan.");
-      helperText.innerText = "Your practice session is closed. Use your phone’s Back button to return to the Morgan app.";
-
+    function returnToAdalo() {
       try {
         window.history.go(-1);
       } catch (_) {}
@@ -454,6 +486,46 @@
       }, 600);
     }
 
+    async function endMorganSession() {
+      try {
+        setStatus("Ending session...");
+        await cleanupSession();
+      } catch (_) {}
+
+      isStarting = false;
+      isConnected = false;
+
+      liveIndicator.style.display = "none";
+      showStartButton();
+
+      setStatus("Session ended");
+      updateTranscript("Your session has ended. Tap your phone’s Back button to return to Morgan.");
+      helperText.innerText = "Your practice session is closed. Use your phone’s Back button to return to the Morgan app.";
+
+      returnToAdalo();
+    }
+
+    async function endMorganTrialSession() {
+      try {
+        setStatus("Free practice ended");
+        await cleanupSession();
+      } catch (_) {}
+
+      isStarting = false;
+      isConnected = false;
+
+      liveIndicator.style.display = "none";
+      showStartButton();
+
+      setStatus("Free practice ended");
+      updateTranscript("Tu tiempo de práctica gratuita ha finalizado. Elige un plan para seguir practicando inglés con Morgan.");
+      helperText.innerText = "Returning to Morgan...";
+
+      setTimeout(() => {
+        returnToAdalo();
+      }, 1200);
+    }
+
     async function startMorgan() {
       if (isStarting || isConnected) return;
 
@@ -461,7 +533,12 @@
       hideStartButton();
       setStatus("Connecting...");
       updateTranscript("Morgan is getting ready...");
-      helperText.innerText = "Tap End Session when you finish practicing.";
+
+      if (isPaidAccess) {
+        helperText.innerText = "Tap End Session when you finish practicing.";
+      } else {
+        helperText.innerText = "Your free practice session will last 3 minutes.";
+      }
 
       try {
         await cleanupSession();
@@ -516,6 +593,7 @@
           isStarting = false;
           isConnected = true;
           updateTranscript("Morgan is listening...");
+          startTrialTimer();
         };
 
         dc.onmessage = (event) => {
