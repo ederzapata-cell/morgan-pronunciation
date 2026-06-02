@@ -341,7 +341,7 @@
       <button id="endSessionBtn" class="btn end-btn">End Session</button>
 
       <div class="helper-text" id="helperText">
-        Tap End Session when you finish practicing.
+        Loading your practice time...
       </div>
     </div>
 
@@ -351,7 +351,22 @@
     </div>
   </div>
 
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+
   <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCRkbUlnab-JCpCBBEaNx115TJlaTFsFFA",
+      authDomain: "morgan-private-english.firebaseapp.com",
+      projectId: "morgan-private-english",
+      storageBucket: "morgan-private-english.firebasestorage.app",
+      messagingSenderId: "332315256815",
+      appId: "1:332315256815:web:00fc1cd1710b0e0037381a"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
     let pc = null;
     let dc = null;
     let localStream = null;
@@ -362,28 +377,22 @@
 
     let practiceTimer = null;
     let sessionSecondsUsed = 0;
+    let sessionSecondsReported = 0;
+    let firebaseReady = false;
+    let userUsageDocRef = null;
 
     const FREE_TRIAL_SECONDS = 180;
+    const FIREBASE_COLLECTION = "users_usage";
+    const CHECKPOINT_INTERVAL_SECONDS = 15;
 
     const urlParams = new URLSearchParams(window.location.search);
     const accessMode = urlParams.get("access");
     const planType = (urlParams.get("plan") || "").toLowerCase();
-    const userEmail = urlParams.get("email") || "";
+    const userEmail = (urlParams.get("email") || "").trim().toLowerCase();
 
     const isPaidAccess = accessMode === "paid";
     const rawRemaining = parseInt(urlParams.get("remaining") || "0", 10);
     let paidSecondsRemaining = Number.isFinite(rawRemaining) ? Math.max(0, rawRemaining) : 0;
-
-    const isAnnualPlan =
-      isPaidAccess &&
-      (planType === "annual" || paidSecondsRemaining >= 999999);
-
-    /*
-      Later we will paste a Make webhook URL here.
-      For now it is empty, so Netlify will cut the session,
-      but it will NOT update Adalo usage yet.
-    */
-    const REPORT_USAGE_WEBHOOK_URL = "https://hook.us2.make.com/atisokvoqscetyco607jbgwef87kadpg";
 
     const startBtn = document.getElementById("startBtn");
     const endSessionBtn = document.getElementById("endSessionBtn");
@@ -419,6 +428,33 @@
       return `${mins}:${secs.toString().padStart(2, "0")}`;
     }
 
+    function getPlanLabel() {
+      if (planType === "basic") return "Basic";
+      if (planType === "plus") return "Plus";
+      if (planType === "annual") return "Annual";
+      return "Paid";
+    }
+
+    function getDefaultLimitForPlan(plan) {
+      if (plan === "basic") return 900;
+      if (plan === "plus") return 2400;
+      if (plan === "annual") return 999999;
+      return Math.max(0, paidSecondsRemaining || 0);
+    }
+
+    function isAnnualPlan() {
+      return isPaidAccess && (planType === "annual" || paidSecondsRemaining >= 999999);
+    }
+
+    function makeSafeDocId(email) {
+      return email
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    }
+
     function clearPracticeTimer() {
       if (practiceTimer) {
         clearInterval(practiceTimer);
@@ -426,11 +462,96 @@
       }
     }
 
-    function getPlanLabel() {
-      if (planType === "basic") return "Basic";
-      if (planType === "plus") return "Plus";
-      if (planType === "annual") return "Annual";
-      return "Paid";
+    async function loadOrCreateUsageRecord() {
+      if (!isPaidAccess) {
+        firebaseReady = true;
+        initializeAccessDisplay();
+        return;
+      }
+
+      if (!userEmail) {
+        firebaseReady = true;
+        setStatus("Missing email");
+        updateTranscript("We could not identify your account. Please return to Morgan and try again.");
+        helperText.innerText = "Missing user email.";
+        startBtn.disabled = true;
+        return;
+      }
+
+      const docId = makeSafeDocId(userEmail);
+      userUsageDocRef = db.collection(FIREBASE_COLLECTION).doc(docId);
+
+      try {
+        const snap = await userUsageDocRef.get();
+        const defaultLimit = getDefaultLimitForPlan(planType);
+
+        if (!snap.exists) {
+          const initialRemaining = defaultLimit;
+
+          await userUsageDocRef.set({
+            email: userEmail,
+            plan: planType,
+            monthly_seconds_limit: defaultLimit,
+            paid_seconds_used: 0,
+            remaining_seconds: initialRemaining,
+            last_session_seconds: 0,
+            created_at: firebase.firestore.FieldValue.serverTimestamp(),
+            updated_at: firebase.firestore.FieldValue.serverTimestamp()
+          });
+
+          paidSecondsRemaining = initialRemaining;
+        } else {
+          const data = snap.data() || {};
+          const storedPlan = (data.plan || "").toLowerCase();
+
+          if (storedPlan && storedPlan !== planType) {
+            const newLimit = defaultLimit;
+
+            await userUsageDocRef.set({
+              email: userEmail,
+              plan: planType,
+              monthly_seconds_limit: newLimit,
+              paid_seconds_used: 0,
+              remaining_seconds: newLimit,
+              last_session_seconds: 0,
+              updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+              plan_changed_at: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+
+            paidSecondsRemaining = newLimit;
+          } else {
+            const firestoreRemaining = Number(data.remaining_seconds);
+            const firestoreLimit = Number(data.monthly_seconds_limit);
+
+            if (Number.isFinite(firestoreRemaining)) {
+              paidSecondsRemaining = Math.max(0, firestoreRemaining);
+            } else if (Number.isFinite(firestoreLimit)) {
+              paidSecondsRemaining = Math.max(0, firestoreLimit);
+            } else {
+              paidSecondsRemaining = defaultLimit;
+
+              await userUsageDocRef.set({
+                email: userEmail,
+                plan: planType,
+                monthly_seconds_limit: defaultLimit,
+                remaining_seconds: defaultLimit,
+                updated_at: firebase.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
+            }
+          }
+        }
+
+        firebaseReady = true;
+        initializeAccessDisplay();
+
+      } catch (err) {
+        console.error("Firebase load/create error:", err);
+        firebaseReady = false;
+        setStatus("Firebase error");
+        updateTranscript("We could not load your remaining practice time. Please try again.");
+        helperText.innerText = "Could not load usage data.";
+        startBtn.disabled = true;
+      }
     }
 
     function initializeAccessDisplay() {
@@ -439,7 +560,7 @@
         return;
       }
 
-      if (isAnnualPlan) {
+      if (isAnnualPlan()) {
         helperText.innerText = "Annual plan: unlimited speaking practice.";
         return;
       }
@@ -456,35 +577,71 @@
     }
 
     async function reportUsage(reason) {
-      if (!REPORT_USAGE_WEBHOOK_URL) return;
-      if (!isPaidAccess || isAnnualPlan) return;
-      if (sessionSecondsUsed <= 0) return;
+      if (!isPaidAccess || isAnnualPlan()) return;
+      if (!userUsageDocRef) return;
 
-      const payload = {
-        email: userEmail,
-        plan: planType,
-        session_seconds: sessionSecondsUsed,
-        remaining_seconds_after_session: Math.max(0, paidSecondsRemaining),
-        reason: reason || "unknown",
-        source: "morgan_netlify"
-      };
+      const deltaToReport = sessionSecondsUsed - sessionSecondsReported;
+
+      if (deltaToReport <= 0) return;
 
       try {
-        await fetch(REPORT_USAGE_WEBHOOK_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(payload)
+        let newRemainingFromFirestore = paidSecondsRemaining;
+
+        await db.runTransaction(async (transaction) => {
+          const snap = await transaction.get(userUsageDocRef);
+
+          if (!snap.exists) {
+            const defaultLimit = getDefaultLimitForPlan(planType);
+            const newRemaining = Math.max(0, defaultLimit - deltaToReport);
+
+            transaction.set(userUsageDocRef, {
+              email: userEmail,
+              plan: planType,
+              monthly_seconds_limit: defaultLimit,
+              paid_seconds_used: deltaToReport,
+              remaining_seconds: newRemaining,
+              last_session_seconds: deltaToReport,
+              last_reason: reason || "unknown",
+              created_at: firebase.firestore.FieldValue.serverTimestamp(),
+              updated_at: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            newRemainingFromFirestore = newRemaining;
+            return;
+          }
+
+          const data = snap.data() || {};
+          const currentRemaining = Math.max(0, Number(data.remaining_seconds) || 0);
+          const currentUsed = Math.max(0, Number(data.paid_seconds_used) || 0);
+
+          const newRemaining = Math.max(0, currentRemaining - deltaToReport);
+          const newUsed = currentUsed + deltaToReport;
+
+          transaction.set(userUsageDocRef, {
+            email: userEmail,
+            plan: planType,
+            paid_seconds_used: newUsed,
+            remaining_seconds: newRemaining,
+            last_session_seconds: deltaToReport,
+            last_reason: reason || "unknown",
+            updated_at: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+
+          newRemainingFromFirestore = newRemaining;
         });
+
+        sessionSecondsReported = sessionSecondsUsed;
+        paidSecondsRemaining = Math.max(0, newRemainingFromFirestore);
+
       } catch (err) {
-        console.error("Usage report failed:", err);
+        console.error("Firebase usage report failed:", err);
       }
     }
 
     function startPracticeTimer() {
       clearPracticeTimer();
       sessionSecondsUsed = 0;
+      sessionSecondsReported = 0;
 
       if (!isPaidAccess) {
         let freeSecondsRemaining = FREE_TRIAL_SECONDS;
@@ -505,7 +662,7 @@
         return;
       }
 
-      if (isAnnualPlan) {
+      if (isAnnualPlan()) {
         helperText.innerText = "Annual plan: unlimited speaking practice.";
         return;
       }
@@ -521,6 +678,10 @@
       practiceTimer = setInterval(async () => {
         paidSecondsRemaining -= 1;
         sessionSecondsUsed += 1;
+
+        if (sessionSecondsUsed > 0 && sessionSecondsUsed % CHECKPOINT_INTERVAL_SECONDS === 0) {
+          await reportUsage("checkpoint");
+        }
 
         if (paidSecondsRemaining > 0) {
           helperText.innerText = `${getPlanLabel()} plan time remaining: ${formatTime(paidSecondsRemaining)}`;
@@ -652,7 +813,13 @@
     async function startMorgan() {
       if (isStarting || isConnected) return;
 
-      if (isPaidAccess && !isAnnualPlan && paidSecondsRemaining <= 0) {
+      if (isPaidAccess && !firebaseReady) {
+        setStatus("Loading time...");
+        updateTranscript("Please wait while we load your remaining practice time.");
+        return;
+      }
+
+      if (isPaidAccess && !isAnnualPlan() && paidSecondsRemaining <= 0) {
         setStatus("No time remaining");
         updateTranscript("You have used all your speaking time for this month. Please return to Morgan to manage your plan.");
         helperText.innerText = "No speaking time remaining this month.";
@@ -667,7 +834,7 @@
 
       if (!isPaidAccess) {
         helperText.innerText = "Your free practice session will last 3 minutes.";
-      } else if (isAnnualPlan) {
+      } else if (isAnnualPlan()) {
         helperText.innerText = "Annual plan: unlimited speaking practice.";
       } else {
         helperText.innerText = `${getPlanLabel()} plan time remaining: ${formatTime(paidSecondsRemaining)}`;
@@ -677,6 +844,7 @@
         await cleanupSession();
         transcript = "";
         sessionSecondsUsed = 0;
+        sessionSecondsReported = 0;
 
         const tokenRes = await fetch("/.netlify/functions/session");
         const tokenData = await tokenRes.json();
@@ -791,31 +959,16 @@
     }
 
     window.addEventListener("beforeunload", () => {
-      if (!REPORT_USAGE_WEBHOOK_URL) return;
-      if (!isPaidAccess || isAnnualPlan) return;
-      if (sessionSecondsUsed <= 0) return;
+      if (!isPaidAccess || isAnnualPlan()) return;
+      if (sessionSecondsUsed <= sessionSecondsReported) return;
 
-      const payload = JSON.stringify({
-        email: userEmail,
-        plan: planType,
-        session_seconds: sessionSecondsUsed,
-        remaining_seconds_after_session: Math.max(0, paidSecondsRemaining),
-        reason: "beforeunload",
-        source: "morgan_netlify"
-      });
-
-      try {
-        navigator.sendBeacon(
-          REPORT_USAGE_WEBHOOK_URL,
-          new Blob([payload], { type: "application/json" })
-        );
-      } catch (_) {}
+      reportUsage("beforeunload");
     });
 
     startBtn.addEventListener("click", startMorgan);
     endSessionBtn.addEventListener("click", endMorganSession);
 
-    initializeAccessDisplay();
+    loadOrCreateUsageRecord();
   </script>
 </body>
 </html>
