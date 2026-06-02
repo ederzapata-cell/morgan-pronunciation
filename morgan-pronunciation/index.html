@@ -360,13 +360,30 @@
     let isStarting = false;
     let isConnected = false;
 
-    let trialTimer = null;
-    let trialSecondsRemaining = 180;
+    let practiceTimer = null;
+    let sessionSecondsUsed = 0;
+
     const FREE_TRIAL_SECONDS = 180;
 
     const urlParams = new URLSearchParams(window.location.search);
     const accessMode = urlParams.get("access");
+    const planType = (urlParams.get("plan") || "").toLowerCase();
+    const userEmail = urlParams.get("email") || "";
+
     const isPaidAccess = accessMode === "paid";
+    const rawRemaining = parseInt(urlParams.get("remaining") || "0", 10);
+    let paidSecondsRemaining = Number.isFinite(rawRemaining) ? Math.max(0, rawRemaining) : 0;
+
+    const isAnnualPlan =
+      isPaidAccess &&
+      (planType === "annual" || paidSecondsRemaining >= 999999);
+
+    /*
+      Later we will paste a Make webhook URL here.
+      For now it is empty, so Netlify will cut the session,
+      but it will NOT update Adalo usage yet.
+    */
+    const REPORT_USAGE_WEBHOOK_URL = "";
 
     const startBtn = document.getElementById("startBtn");
     const endSessionBtn = document.getElementById("endSessionBtn");
@@ -396,44 +413,127 @@
     }
 
     function formatTime(seconds) {
-      const mins = Math.floor(seconds / 60);
-      const secs = seconds % 60;
+      const safeSeconds = Math.max(0, Number(seconds) || 0);
+      const mins = Math.floor(safeSeconds / 60);
+      const secs = safeSeconds % 60;
       return `${mins}:${secs.toString().padStart(2, "0")}`;
     }
 
-    function clearTrialTimer() {
-      if (trialTimer) {
-        clearInterval(trialTimer);
-        trialTimer = null;
+    function clearPracticeTimer() {
+      if (practiceTimer) {
+        clearInterval(practiceTimer);
+        practiceTimer = null;
       }
     }
 
-    function startTrialTimer() {
-      clearTrialTimer();
+    function getPlanLabel() {
+      if (planType === "basic") return "Basic";
+      if (planType === "plus") return "Plus";
+      if (planType === "annual") return "Annual";
+      return "Paid";
+    }
 
-      if (isPaidAccess) {
-        helperText.innerText = "Tap End Session when you finish practicing.";
+    function initializeAccessDisplay() {
+      if (!isPaidAccess) {
+        helperText.innerText = "Your free practice session will last 3 minutes.";
         return;
       }
 
-      trialSecondsRemaining = FREE_TRIAL_SECONDS;
-      helperText.innerText = `Free practice time remaining: ${formatTime(trialSecondsRemaining)}`;
+      if (isAnnualPlan) {
+        helperText.innerText = "Annual plan: unlimited speaking practice.";
+        return;
+      }
 
-      trialTimer = setInterval(async () => {
-        trialSecondsRemaining -= 1;
+      if (paidSecondsRemaining <= 0) {
+        startBtn.disabled = true;
+        setStatus("No time remaining");
+        updateTranscript("You have used all your speaking time for this month. Please return to Morgan to manage your plan.");
+        helperText.innerText = "No speaking time remaining this month.";
+        return;
+      }
 
-        if (trialSecondsRemaining > 0) {
-          helperText.innerText = `Free practice time remaining: ${formatTime(trialSecondsRemaining)}`;
+      helperText.innerText = `${getPlanLabel()} plan time remaining: ${formatTime(paidSecondsRemaining)}`;
+    }
+
+    async function reportUsage(reason) {
+      if (!REPORT_USAGE_WEBHOOK_URL) return;
+      if (!isPaidAccess || isAnnualPlan) return;
+      if (sessionSecondsUsed <= 0) return;
+
+      const payload = {
+        email: userEmail,
+        plan: planType,
+        session_seconds: sessionSecondsUsed,
+        remaining_seconds_after_session: Math.max(0, paidSecondsRemaining),
+        reason: reason || "unknown",
+        source: "morgan_netlify"
+      };
+
+      try {
+        await fetch(REPORT_USAGE_WEBHOOK_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        console.error("Usage report failed:", err);
+      }
+    }
+
+    function startPracticeTimer() {
+      clearPracticeTimer();
+      sessionSecondsUsed = 0;
+
+      if (!isPaidAccess) {
+        let freeSecondsRemaining = FREE_TRIAL_SECONDS;
+        helperText.innerText = `Free practice time remaining: ${formatTime(freeSecondsRemaining)}`;
+
+        practiceTimer = setInterval(async () => {
+          freeSecondsRemaining -= 1;
+
+          if (freeSecondsRemaining > 0) {
+            helperText.innerText = `Free practice time remaining: ${formatTime(freeSecondsRemaining)}`;
+            return;
+          }
+
+          clearPracticeTimer();
+          await endMorganTrialSession();
+        }, 1000);
+
+        return;
+      }
+
+      if (isAnnualPlan) {
+        helperText.innerText = "Annual plan: unlimited speaking practice.";
+        return;
+      }
+
+      if (paidSecondsRemaining <= 0) {
+        clearPracticeTimer();
+        endMorganPaidTimeSession();
+        return;
+      }
+
+      helperText.innerText = `${getPlanLabel()} plan time remaining: ${formatTime(paidSecondsRemaining)}`;
+
+      practiceTimer = setInterval(async () => {
+        paidSecondsRemaining -= 1;
+        sessionSecondsUsed += 1;
+
+        if (paidSecondsRemaining > 0) {
+          helperText.innerText = `${getPlanLabel()} plan time remaining: ${formatTime(paidSecondsRemaining)}`;
           return;
         }
 
-        clearTrialTimer();
-        await endMorganTrialSession();
+        clearPracticeTimer();
+        await endMorganPaidTimeSession();
       }, 1000);
     }
 
     async function cleanupSession() {
-      clearTrialTimer();
+      clearPracticeTimer();
 
       try {
         if (dc) {
@@ -489,6 +589,7 @@
     async function endMorganSession() {
       try {
         setStatus("Ending session...");
+        await reportUsage("manual_end");
         await cleanupSession();
       } catch (_) {}
 
@@ -526,23 +627,56 @@
       }, 1200);
     }
 
+    async function endMorganPaidTimeSession() {
+      try {
+        setStatus("Time limit reached");
+        await reportUsage("time_limit_reached");
+        await cleanupSession();
+      } catch (_) {}
+
+      isStarting = false;
+      isConnected = false;
+
+      liveIndicator.style.display = "none";
+      showStartButton();
+
+      setStatus("Time limit reached");
+      updateTranscript("Your speaking time for this month has ended. Return to Morgan to manage your plan.");
+      helperText.innerText = "Returning to Morgan...";
+
+      setTimeout(() => {
+        returnToAdalo();
+      }, 1200);
+    }
+
     async function startMorgan() {
       if (isStarting || isConnected) return;
+
+      if (isPaidAccess && !isAnnualPlan && paidSecondsRemaining <= 0) {
+        setStatus("No time remaining");
+        updateTranscript("You have used all your speaking time for this month. Please return to Morgan to manage your plan.");
+        helperText.innerText = "No speaking time remaining this month.";
+        startBtn.disabled = true;
+        return;
+      }
 
       isStarting = true;
       hideStartButton();
       setStatus("Connecting...");
       updateTranscript("Morgan is getting ready...");
 
-      if (isPaidAccess) {
-        helperText.innerText = "Tap End Session when you finish practicing.";
-      } else {
+      if (!isPaidAccess) {
         helperText.innerText = "Your free practice session will last 3 minutes.";
+      } else if (isAnnualPlan) {
+        helperText.innerText = "Annual plan: unlimited speaking practice.";
+      } else {
+        helperText.innerText = `${getPlanLabel()} plan time remaining: ${formatTime(paidSecondsRemaining)}`;
       }
 
       try {
         await cleanupSession();
         transcript = "";
+        sessionSecondsUsed = 0;
 
         const tokenRes = await fetch("/.netlify/functions/session");
         const tokenData = await tokenRes.json();
@@ -574,6 +708,7 @@
             pc.connectionState === "disconnected" ||
             pc.connectionState === "closed"
           ) {
+            await reportUsage("connection_closed");
             await cleanupSession();
             isStarting = false;
             isConnected = false;
@@ -593,7 +728,7 @@
           isStarting = false;
           isConnected = true;
           updateTranscript("Morgan is listening...");
-          startTrialTimer();
+          startPracticeTimer();
         };
 
         dc.onmessage = (event) => {
@@ -655,8 +790,32 @@
       }
     }
 
+    window.addEventListener("beforeunload", () => {
+      if (!REPORT_USAGE_WEBHOOK_URL) return;
+      if (!isPaidAccess || isAnnualPlan) return;
+      if (sessionSecondsUsed <= 0) return;
+
+      const payload = JSON.stringify({
+        email: userEmail,
+        plan: planType,
+        session_seconds: sessionSecondsUsed,
+        remaining_seconds_after_session: Math.max(0, paidSecondsRemaining),
+        reason: "beforeunload",
+        source: "morgan_netlify"
+      });
+
+      try {
+        navigator.sendBeacon(
+          REPORT_USAGE_WEBHOOK_URL,
+          new Blob([payload], { type: "application/json" })
+        );
+      } catch (_) {}
+    });
+
     startBtn.addEventListener("click", startMorgan);
     endSessionBtn.addEventListener("click", endMorganSession);
+
+    initializeAccessDisplay();
   </script>
 </body>
 </html>
