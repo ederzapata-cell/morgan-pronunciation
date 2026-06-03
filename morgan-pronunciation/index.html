@@ -391,6 +391,8 @@
     const userEmail = (urlParams.get("email") || "").trim().toLowerCase();
 
     const isPaidAccess = accessMode === "paid";
+    const validPaidPlans = ["basic", "plus", "annual"];
+    const hasValidPaidPlan = isPaidAccess && validPaidPlans.includes(planType);
     const rawRemaining = parseInt(urlParams.get("remaining") || "0", 10);
     let paidSecondsRemaining = Number.isFinite(rawRemaining) ? Math.max(0, rawRemaining) : 0;
 
@@ -442,8 +444,18 @@
       return Math.max(0, paidSecondsRemaining || 0);
     }
 
+    function getActivationLimitForPlan(plan) {
+      const defaultLimit = getDefaultLimitForPlan(plan);
+      if (plan === "annual") return 999999;
+
+      // IMPORTANT:
+      // If Adalo sends a higher paid remaining value in the URL, trust it.
+      // This prevents an old Firestore record with 0 seconds from blocking a newly paid user.
+      return Math.max(defaultLimit, paidSecondsRemaining || 0);
+    }
+
     function isAnnualPlan() {
-      return isPaidAccess && (planType === "annual" || paidSecondsRemaining >= 999999);
+      return hasValidPaidPlan && (planType === "annual" || paidSecondsRemaining >= 999999);
     }
 
     function makeSafeDocId(email) {
@@ -469,6 +481,15 @@
         return;
       }
 
+      if (!hasValidPaidPlan) {
+        firebaseReady = true;
+        setStatus("Invalid plan");
+        updateTranscript("We could not validate your Morgan plan. Please return to Morgan and try again.");
+        helperText.innerText = "Invalid or missing plan.";
+        startBtn.disabled = true;
+        return;
+      }
+
       if (!userEmail) {
         firebaseReady = true;
         setStatus("Missing email");
@@ -484,17 +505,19 @@
       try {
         const snap = await userUsageDocRef.get();
         const defaultLimit = getDefaultLimitForPlan(planType);
+        const activationLimit = getActivationLimitForPlan(planType);
 
         if (!snap.exists) {
-          const initialRemaining = defaultLimit;
+          const initialRemaining = activationLimit;
 
           await userUsageDocRef.set({
             email: userEmail,
             plan: planType,
-            monthly_seconds_limit: defaultLimit,
+            monthly_seconds_limit: activationLimit,
             paid_seconds_used: 0,
             remaining_seconds: initialRemaining,
             last_session_seconds: 0,
+            subscription_activated_at: firebase.firestore.FieldValue.serverTimestamp(),
             created_at: firebase.firestore.FieldValue.serverTimestamp(),
             updated_at: firebase.firestore.FieldValue.serverTimestamp()
           });
@@ -503,41 +526,94 @@
         } else {
           const data = snap.data() || {};
           const storedPlan = (data.plan || "").toLowerCase();
+          const firestoreRemaining = Number(data.remaining_seconds);
+          const firestoreLimit = Number(data.monthly_seconds_limit);
+          const alreadyActivated = !!data.subscription_activated_at;
 
-          if (storedPlan && storedPlan !== planType) {
-            const newLimit = defaultLimit;
+          // CASE 1:
+          // No plan saved yet, or the saved plan is different from the current paid plan.
+          // This happens when a user buys Basic/Plus/Annual after using free minutes.
+          if (!storedPlan || storedPlan !== planType) {
+            await userUsageDocRef.set({
+              email: userEmail,
+              plan: planType,
+              monthly_seconds_limit: activationLimit,
+              paid_seconds_used: 0,
+              remaining_seconds: activationLimit,
+              last_session_seconds: 0,
+              subscription_activated_at: firebase.firestore.FieldValue.serverTimestamp(),
+              updated_at: firebase.firestore.FieldValue.serverTimestamp(),
+              plan_changed_at: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+
+            paidSecondsRemaining = activationLimit;
+
+          // CASE 2:
+          // Old Firestore record has 0 seconds, but this is the first time we are activating
+          // the paid subscription in Netlify. Reset once, then do not reset again every visit.
+          } else if (Number.isFinite(firestoreRemaining) && firestoreRemaining <= 0 && !alreadyActivated) {
+            await userUsageDocRef.set({
+              email: userEmail,
+              plan: planType,
+              monthly_seconds_limit: activationLimit,
+              paid_seconds_used: 0,
+              remaining_seconds: activationLimit,
+              last_session_seconds: 0,
+              subscription_activated_at: firebase.firestore.FieldValue.serverTimestamp(),
+              updated_at: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+
+            paidSecondsRemaining = activationLimit;
+
+          // CASE 3:
+          // Adalo sends a higher remaining value than Firestore currently has.
+          // Trust the paid URL value and update Firestore.
+          } else if (paidSecondsRemaining > 0 && (!Number.isFinite(firestoreRemaining) || paidSecondsRemaining > firestoreRemaining)) {
+            const newLimit = Math.max(
+              activationLimit,
+              Number.isFinite(firestoreLimit) ? firestoreLimit : 0,
+              paidSecondsRemaining
+            );
 
             await userUsageDocRef.set({
               email: userEmail,
               plan: planType,
               monthly_seconds_limit: newLimit,
-              paid_seconds_used: 0,
-              remaining_seconds: newLimit,
-              last_session_seconds: 0,
-              updated_at: firebase.firestore.FieldValue.serverTimestamp(),
-              plan_changed_at: firebase.firestore.FieldValue.serverTimestamp()
+              remaining_seconds: paidSecondsRemaining,
+              subscription_activated_at: alreadyActivated ? data.subscription_activated_at : firebase.firestore.FieldValue.serverTimestamp(),
+              updated_at: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
 
-            paidSecondsRemaining = newLimit;
+            paidSecondsRemaining = paidSecondsRemaining;
+
+          // CASE 4:
+          // Normal returning paid user. Use Firestore remaining time.
+          } else if (Number.isFinite(firestoreRemaining)) {
+            paidSecondsRemaining = Math.max(0, firestoreRemaining);
+
+          } else if (Number.isFinite(firestoreLimit)) {
+            paidSecondsRemaining = Math.max(0, firestoreLimit);
+
+            await userUsageDocRef.set({
+              email: userEmail,
+              plan: planType,
+              monthly_seconds_limit: Math.max(firestoreLimit, activationLimit),
+              remaining_seconds: paidSecondsRemaining,
+              subscription_activated_at: alreadyActivated ? data.subscription_activated_at : firebase.firestore.FieldValue.serverTimestamp(),
+              updated_at: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+
           } else {
-            const firestoreRemaining = Number(data.remaining_seconds);
-            const firestoreLimit = Number(data.monthly_seconds_limit);
+            paidSecondsRemaining = activationLimit;
 
-            if (Number.isFinite(firestoreRemaining)) {
-              paidSecondsRemaining = Math.max(0, firestoreRemaining);
-            } else if (Number.isFinite(firestoreLimit)) {
-              paidSecondsRemaining = Math.max(0, firestoreLimit);
-            } else {
-              paidSecondsRemaining = defaultLimit;
-
-              await userUsageDocRef.set({
-                email: userEmail,
-                plan: planType,
-                monthly_seconds_limit: defaultLimit,
-                remaining_seconds: defaultLimit,
-                updated_at: firebase.firestore.FieldValue.serverTimestamp()
-              }, { merge: true });
-            }
+            await userUsageDocRef.set({
+              email: userEmail,
+              plan: planType,
+              monthly_seconds_limit: activationLimit,
+              remaining_seconds: activationLimit,
+              subscription_activated_at: alreadyActivated ? data.subscription_activated_at : firebase.firestore.FieldValue.serverTimestamp(),
+              updated_at: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
           }
         }
 
@@ -577,7 +653,7 @@
     }
 
     async function reportUsage(reason) {
-      if (!isPaidAccess || isAnnualPlan()) return;
+      if (!hasValidPaidPlan || isAnnualPlan()) return;
       if (!userUsageDocRef) return;
 
       const deltaToReport = sessionSecondsUsed - sessionSecondsReported;
@@ -813,13 +889,13 @@
     async function startMorgan() {
       if (isStarting || isConnected) return;
 
-      if (isPaidAccess && !firebaseReady) {
+      if (hasValidPaidPlan && !firebaseReady) {
         setStatus("Loading time...");
         updateTranscript("Please wait while we load your remaining practice time.");
         return;
       }
 
-      if (isPaidAccess && !isAnnualPlan() && paidSecondsRemaining <= 0) {
+      if (hasValidPaidPlan && !isAnnualPlan() && paidSecondsRemaining <= 0) {
         setStatus("No time remaining");
         updateTranscript("You have used all your speaking time for this month. Please return to Morgan to manage your plan.");
         helperText.innerText = "No speaking time remaining this month.";
@@ -959,7 +1035,7 @@
     }
 
     window.addEventListener("beforeunload", () => {
-      if (!isPaidAccess || isAnnualPlan()) return;
+      if (!hasValidPaidPlan || isAnnualPlan()) return;
       if (sessionSecondsUsed <= sessionSecondsReported) return;
 
       reportUsage("beforeunload");
