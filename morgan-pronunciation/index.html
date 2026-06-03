@@ -394,7 +394,10 @@
     const validPaidPlans = ["basic", "plus", "annual"];
     const hasValidPaidPlan = isPaidAccess && validPaidPlans.includes(planType);
     const rawRemaining = parseInt(urlParams.get("remaining") || "0", 10);
-    let paidSecondsRemaining = Number.isFinite(rawRemaining) ? Math.max(0, rawRemaining) : 0;
+    // IMPORTANT:
+    // Adalo may send remaining_seconds through Magic Text, but Netlify is the source of truth
+    // for official plan limits. Do not let the URL value define the paid plan limit.
+    let paidSecondsRemaining = 0;
 
     const startBtn = document.getElementById("startBtn");
     const endSessionBtn = document.getElementById("endSessionBtn");
@@ -438,24 +441,22 @@
     }
 
     function getDefaultLimitForPlan(plan) {
-      if (plan === "basic") return 900;
-      if (plan === "plus") return 2400;
-      if (plan === "annual") return 999999;
-      return Math.max(0, paidSecondsRemaining || 0);
+      if (plan === "basic") return 900;      // 15 minutes
+      if (plan === "plus") return 2400;      // 40 minutes
+      if (plan === "annual") return 999999;  // unlimited placeholder
+      return 0;
     }
 
     function getActivationLimitForPlan(plan) {
-      const defaultLimit = getDefaultLimitForPlan(plan);
-      if (plan === "annual") return 999999;
-
-      // IMPORTANT:
-      // If Adalo sends a higher paid remaining value in the URL, trust it.
-      // This prevents an old Firestore record with 0 seconds from blocking a newly paid user.
-      return Math.max(defaultLimit, paidSecondsRemaining || 0);
+      // Official monthly limits by plan.
+      // Basic = 15 minutes = 900 seconds.
+      // Plus = 40 minutes = 2400 seconds.
+      // Annual = unlimited.
+      return getDefaultLimitForPlan(plan);
     }
 
     function isAnnualPlan() {
-      return hasValidPaidPlan && (planType === "annual" || paidSecondsRemaining >= 999999);
+      return hasValidPaidPlan && planType === "annual";
     }
 
     function makeSafeDocId(email) {
@@ -566,30 +567,28 @@
             paidSecondsRemaining = activationLimit;
 
           // CASE 3:
-          // Adalo sends a higher remaining value than Firestore currently has.
-          // Trust the paid URL value and update Firestore.
-          } else if (paidSecondsRemaining > 0 && (!Number.isFinite(firestoreRemaining) || paidSecondsRemaining > firestoreRemaining)) {
-            const newLimit = Math.max(
-              activationLimit,
-              Number.isFinite(firestoreLimit) ? firestoreLimit : 0,
-              paidSecondsRemaining
-            );
-
+          // Safety correction: if a previous deploy saved more time than the official plan limit,
+          // cap it back to the correct monthly limit. This fixes Basic showing 60:00 instead of 15:00.
+          } else if (!isAnnualPlan() && Number.isFinite(firestoreRemaining) && firestoreRemaining > defaultLimit) {
             await userUsageDocRef.set({
               email: userEmail,
               plan: planType,
-              monthly_seconds_limit: newLimit,
-              remaining_seconds: paidSecondsRemaining,
+              monthly_seconds_limit: defaultLimit,
+              paid_seconds_used: 0,
+              remaining_seconds: defaultLimit,
+              corrected_plan_limit_at: firebase.firestore.FieldValue.serverTimestamp(),
               subscription_activated_at: alreadyActivated ? data.subscription_activated_at : firebase.firestore.FieldValue.serverTimestamp(),
               updated_at: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
 
-            paidSecondsRemaining = paidSecondsRemaining;
+            paidSecondsRemaining = defaultLimit;
 
           // CASE 4:
-          // Normal returning paid user. Use Firestore remaining time.
+          // Normal returning paid user. Use Firestore remaining time, capped by the official plan limit.
           } else if (Number.isFinite(firestoreRemaining)) {
-            paidSecondsRemaining = Math.max(0, firestoreRemaining);
+            paidSecondsRemaining = isAnnualPlan()
+              ? Math.max(0, firestoreRemaining)
+              : Math.min(defaultLimit, Math.max(0, firestoreRemaining));
 
           } else if (Number.isFinite(firestoreLimit)) {
             paidSecondsRemaining = Math.max(0, firestoreLimit);
