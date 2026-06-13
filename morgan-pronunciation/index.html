@@ -442,7 +442,7 @@
 
     function getDefaultLimitForPlan(plan) {
       if (plan === "basic") return 900;      // 15 minutes
-      if (plan === "plus") return 2400;      // 40 minutes
+      if (plan === "plus") return 3600;      // 60 minutes
       if (plan === "annual") return 999999;  // unlimited placeholder
       return 0;
     }
@@ -450,7 +450,7 @@
     function getActivationLimitForPlan(plan) {
       // Official monthly limits by plan.
       // Basic = 15 minutes = 900 seconds.
-      // Plus = 40 minutes = 2400 seconds.
+      // Plus = 60 minutes = 3600 seconds.
       // Annual = unlimited.
       return getDefaultLimitForPlan(plan);
     }
